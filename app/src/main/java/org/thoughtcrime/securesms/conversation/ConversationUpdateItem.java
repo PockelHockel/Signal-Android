@@ -1,11 +1,12 @@
 package org.thoughtcrime.securesms.conversation;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.util.AttributeSet;
 import android.view.View;
-import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -14,6 +15,8 @@ import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleOwner;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Observer;
+
+import com.google.android.material.button.MaterialButton;
 
 import org.signal.core.util.logging.Log;
 import org.thoughtcrime.securesms.BindableConversationItem;
@@ -29,6 +32,7 @@ import org.thoughtcrime.securesms.recipients.LiveRecipient;
 import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.util.IdentityUtil;
 import org.thoughtcrime.securesms.util.TextSecurePreferences;
+import org.thoughtcrime.securesms.util.ThemeUtil;
 import org.thoughtcrime.securesms.util.Util;
 import org.thoughtcrime.securesms.util.concurrent.ListenableFuture;
 import org.thoughtcrime.securesms.util.livedata.LiveDataUtil;
@@ -41,7 +45,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 
-public final class ConversationUpdateItem extends LinearLayout
+public final class ConversationUpdateItem extends FrameLayout
                                           implements BindableConversationItem
 {
   private static final String TAG = ConversationUpdateItem.class.getSimpleName();
@@ -49,7 +53,8 @@ public final class ConversationUpdateItem extends LinearLayout
   private Set<ConversationMessage> batchSelected;
 
   private TextView                body;
-  private TextView                actionButton;
+  private MaterialButton          actionButton;
+  private View                    background;
   private ConversationMessage     conversationMessage;
   private Recipient               conversationRecipient;
   private Optional<MessageRecord> nextMessageRecord;
@@ -76,6 +81,7 @@ public final class ConversationUpdateItem extends LinearLayout
     super.onFinishInflate();
     this.body         = findViewById(R.id.conversation_update_body);
     this.actionButton = findViewById(R.id.conversation_update_action);
+    this.background   = findViewById(R.id.conversation_update_background);
 
     this.setOnClickListener(new InternalClickListener(null));
   }
@@ -90,11 +96,12 @@ public final class ConversationUpdateItem extends LinearLayout
                    @NonNull Set<ConversationMessage> batchSelected,
                    @NonNull Recipient conversationRecipient,
                    @Nullable String searchQuery,
-                   boolean pulseMention)
+                   boolean pulseMention,
+                   boolean hasWallpaper)
   {
     this.batchSelected = batchSelected;
 
-    bind(lifecycleOwner, conversationMessage, nextMessageRecord, conversationRecipient);
+    bind(lifecycleOwner, conversationMessage, nextMessageRecord, conversationRecipient, hasWallpaper);
   }
 
   @Override
@@ -110,7 +117,8 @@ public final class ConversationUpdateItem extends LinearLayout
   private void bind(@NonNull LifecycleOwner lifecycleOwner,
                     @NonNull ConversationMessage conversationMessage,
                     @NonNull Optional<MessageRecord> nextMessageRecord,
-                    @NonNull Recipient conversationRecipient)
+                    @NonNull Recipient conversationRecipient,
+                    boolean hasWallpaper)
   {
     this.conversationMessage   = conversationMessage;
     this.messageRecord         = conversationMessage.getMessageRecord();
@@ -125,11 +133,32 @@ public final class ConversationUpdateItem extends LinearLayout
       groupObserver.observe(lifecycleOwner, null);
     }
 
+    if (hasWallpaper) {
+      background.setBackgroundResource(R.drawable.wallpaper_bubble_background_12);
+    } else {
+      background.setBackground(null);
+    }
+
+    int textColor = ContextCompat.getColor(getContext(), R.color.conversation_item_update_text_color);
+    if (ThemeUtil.isDarkTheme(getContext()) && hasWallpaper) {
+      textColor = ContextCompat.getColor(getContext(), R.color.core_grey_15);
+    }
+
+    if (!ThemeUtil.isDarkTheme(getContext())) {
+      if (hasWallpaper) {
+        actionButton.setStrokeColor(ColorStateList.valueOf(getResources().getColor(R.color.core_grey_45)));
+      } else {
+        actionButton.setStrokeColor(ColorStateList.valueOf(getResources().getColor(R.color.signal_button_secondary_stroke)));
+      }
+    }
+
     UpdateDescription   updateDescription = Objects.requireNonNull(messageRecord.getUpdateDisplayBody(getContext()));
-    LiveData<Spannable> liveUpdateMessage = LiveUpdateMessage.fromMessageDescription(getContext(), updateDescription, ContextCompat.getColor(getContext(), R.color.conversation_item_update_text_color));
+    LiveData<Spannable> liveUpdateMessage = LiveUpdateMessage.fromMessageDescription(getContext(), updateDescription, textColor);
     LiveData<Spannable> spannableMessage  = loading(liveUpdateMessage);
 
     observeDisplayBody(lifecycleOwner, spannableMessage);
+
+    present(conversationMessage, nextMessageRecord, conversationRecipient);
   }
 
   /** After a short delay, if the main data hasn't shown yet, then a loading message is displayed. */
@@ -274,10 +303,10 @@ public final class ConversationUpdateItem extends LinearLayout
 
     @Override
     public void onChanged(Recipient recipient) {
-      if (recipient.getId() == conversationRecipient.getId()) {
+      if (recipient.getId() == conversationRecipient.getId() && (conversationRecipient == null || !conversationRecipient.hasSameContent(recipient))) {
         conversationRecipient = recipient;
+        present(conversationMessage, nextMessageRecord, conversationRecipient);
       }
-      present(conversationMessage, nextMessageRecord, conversationRecipient);
     }
   }
 
